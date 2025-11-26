@@ -3,9 +3,12 @@ import scipy
 import numpy as np
 import matplotlib.pyplot as plt
 
+from sklearn.cluster import KMeans, DBSCAN
+from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.metrics import silhouette_score
 
 from tensorflow.keras import layers, models, callbacks, Sequential
 
@@ -240,6 +243,79 @@ def show_autoencoder_reconstructions(autoencoder, images, n_samples=10):
     plt.show()
 
 
+def claster_with_kmeans(features):
+    results = {"k": [], "inertia": [], "silhouette": []}
+
+    for k in range(3, 41):
+        kmean = KMeans(n_clusters=k, random_state=RANDOM_STATE, n_init=10)
+        labels = kmean.fit_predict(features)
+        inertia = kmean.inertia_
+        sil = silhouette_score(features, labels, metric='euclidean')
+        results["k"].append(k)
+        results["inertia"].append(inertia)
+        results["silhouette"].append(sil)
+
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(results["k"], results["inertia"], marker='o')
+    plt.xlabel("k clusters")
+    plt.ylabel("Inertia")
+    plt.title("KMeans: Inertia vs k")
+
+    plt.subplot(1, 2, 2)
+    plt.plot(results["k"], results["silhouette"], marker='o')
+    plt.xlabel("k clusters")
+    plt.ylabel("Silhouette score")
+    plt.title("KMeans: Silhouette vs k")
+    plt.tight_layout()
+    plt.show()
+
+    kmean = KMeans(n_clusters=29, random_state=RANDOM_STATE, n_init=10)
+    return kmean.fit_predict(features)
+
+
+def claster_with_dbscan(features):
+    db = DBSCAN(eps=0.5, min_samples=2, metric='cosine')
+    labels = db.fit_predict(features)
+
+    num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+    print(f"Found {num_clusters} clusters")
+
+    num_noise = list(labels).count(-1)
+    print(f"Noise points: {num_noise}")
+
+
+def claster_with_gmm(features):
+    # TODO: we should try different covariance_type and parameters
+    results = {"n_components": [], "bic": [], "aic": []}
+    for n in range(3, 41):
+        gm = GaussianMixture(n_components=n, covariance_type='full', random_state=RANDOM_STATE)
+        gm.fit(features)
+        labels = gm.predict(features)
+        bic = gm.bic(features)
+        aic = gm.aic(features)
+
+        results["gmm"]["n_components"].append(n)
+        results["gmm"]["bic"].append(bic)
+        results["gmm"]["aic"].append(aic)
+
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 3, 1)
+    plt.plot(results["gmm"]["n_components"], results["gmm"]["bic"], marker='o')
+    plt.xlabel("n_components")
+    plt.ylabel("BIC")
+    plt.title("GMM: BIC vs n_components")
+
+    plt.subplot(1, 3, 2)
+    plt.plot(results["gmm"]["n_components"], results["gmm"]["aic"], marker='o')
+    plt.xlabel("n_components")
+    plt.ylabel("AIC")
+    plt.title("GMM: AIC vs n_components")
+
+    plt.tight_layout()
+    plt.show()
+
+
 def main():
     images, labels = load_data()
     show_sample_images(images, labels, 12)
@@ -253,13 +329,22 @@ def main():
     autoencoder, encoder = build_autoencoder(X_train.shape[1], 64)
     train_autoencoder(autoencoder, X_train, X_val, 50, 64)
     show_autoencoder_reconstructions(autoencoder, X_test, 10)
+    autoencoder_train = encoder.predict(X_train)
 
-    autoencoder, encoder = build_autoencoder(X_train.shape[1], 2)
-    train_autoencoder(autoencoder, X_train, X_val, 20, 64)
-    show_autoencoder_reconstructions(autoencoder, X_test, 10)
-
-    autoencoder_2d_train = encoder.predict(X_train)
+    autoencoder_2d, encoder_2d = build_autoencoder(X_train.shape[1], 2)
+    train_autoencoder(autoencoder_2d, X_train, X_val, 20, 64)
+    show_autoencoder_reconstructions(autoencoder_2d, X_test, 10)
+    autoencoder_2d_train = encoder_2d.predict(X_train)
     plot_2d_embedding(autoencoder_2d_train, y_train, "Autoencoder for only 2 components")
+
+    claster_with_kmeans(X_pca_train)
+    claster_with_kmeans(autoencoder_train)
+
+    claster_with_dbscan(X_pca_train)
+    claster_with_dbscan(autoencoder_train)
+
+    # claster_with_gmm(X_pca_train)
+    # claster_with_gmm(autoencoder_train)
 
 
 main()
