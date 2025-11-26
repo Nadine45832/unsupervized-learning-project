@@ -294,6 +294,7 @@ def train_autoencoder(X_train, X_val, latent_dim=48, epochs=50, batch_size=64):
 
     return autoencoder, encoder
 
+#Gives a before and after of the images
 def show_autoencoder_reconstructions(autoencoder, X_data, img_shape=(112, 92), n_samples=6):
     """
     Show original vs reconstructed images to visually inspect AE quality.
