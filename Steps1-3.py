@@ -176,39 +176,45 @@ def plot_label_distribution(y_train, y_val, y_test, title_prefix=""):
 # STEP 3: DIMENSIONALITY REDUCTION (PCA + AUTOENCODER)
 # ============================================================
 
-def run_pca(X_train, X_val, X_test, n_components_list=(10, 20, 50, 100)):
-    """
-    Run PCA with several component counts and plot explained variance ratio.
-    Also return a PCA model with a chosen number of components (e.g. 50).
-    """
-    explained_variances = {}
+def run_pca(X_train, X_val, X_test, variance_threshold=0.95):
+  
+    # Fit PCA with all components to see the variance curve
+    pca_full = PCA(random_state=RANDOM_STATE)
+    pca_full.fit(X_train)
 
-    for n in n_components_list:
-        pca = PCA(n_components=n, random_state=RANDOM_STATE)
-        pca.fit(X_train)
-        explained_variances[n] = pca.explained_variance_ratio_.sum()
+    explained = pca_full.explained_variance_ratio_
+    cumulative = np.cumsum(explained)
+    n_components_needed = np.searchsorted(cumulative, variance_threshold) + 1
 
-    # Plot cumulative explained variance vs n_components
+    print(f"PCA: variance threshold = {variance_threshold}")
+    print(f"Number of components needed = {n_components_needed}")
+    print(f"Actual cumulative variance = {cumulative[n_components_needed-1]:.4f}")
+
+    # Plot cumulative explained variance
+    max_to_show = min(150, len(cumulative))
     plt.figure(figsize=(6, 4))
-    plt.plot(list(explained_variances.keys()),
-             list(explained_variances.values()), marker='o')
+    plt.plot(np.arange(1, max_to_show + 1), cumulative[:max_to_show], marker='o')
+    plt.axhline(variance_threshold, linestyle='--', label=f"threshold={variance_threshold}")
     plt.xlabel("Number of components")
-    plt.ylabel("Cumulative explained variance ratio")
-    plt.title("PCA - Explained Variance vs Components")
+    plt.ylabel("Cumulative explained variance")
+    plt.title("PCA – Cumulative Explained Variance")
+    plt.legend()
     plt.grid(True)
     plt.tight_layout()
     plt.show()
 
-    
-    chosen_n = 50 if max(n_components_list) >= 50 else max(n_components_list)
-    pca_final = PCA(n_components=chosen_n, random_state=RANDOM_STATE)
+    # Fit PCA again with the chosen number of components
+    pca_final = PCA(n_components=n_components_needed, random_state=RANDOM_STATE)
     Z_train = pca_final.fit_transform(X_train)
     Z_val = pca_final.transform(X_val)
     Z_test = pca_final.transform(X_test)
 
-    # Also compute a 2D projection just for visualization
+    # 2D projection just for visualization
     pca_2d = PCA(n_components=2, random_state=RANDOM_STATE)
     Z_train_2d = pca_2d.fit_transform(X_train)
+
+    return pca_final, (Z_train, Z_val, Z_test), (pca_2d, Z_train_2d)
+
 
     return pca_final, (Z_train, Z_val, Z_test), (pca_2d, Z_train_2d)
 
@@ -228,7 +234,7 @@ def plot_2d_embedding(Z_2d, labels, title="2D Projection", cmap='tab20'):
     plt.show()
 
 
-def build_autoencoder(input_dim, latent_dim=32):
+def build_autoencoder(input_dim, latent_dim=48):  
     """
     Simple fully connected autoencoder.
     """
@@ -252,7 +258,8 @@ def build_autoencoder(input_dim, latent_dim=32):
     return autoencoder, encoder
 
 
-def train_autoencoder(X_train, X_val, latent_dim=32, epochs=50, batch_size=64):
+
+def train_autoencoder(X_train, X_val, latent_dim=48, epochs=50, batch_size=64):
     """
     Train the autoencoder and return (autoencoder, encoder).
     Also plots the reconstruction loss curves.
@@ -287,6 +294,38 @@ def train_autoencoder(X_train, X_val, latent_dim=32, epochs=50, batch_size=64):
 
     return autoencoder, encoder
 
+def show_autoencoder_reconstructions(autoencoder, X_data, img_shape=(112, 92), n_samples=6):
+    """
+    Show original vs reconstructed images to visually inspect AE quality.
+    """
+    n_samples = min(n_samples, len(X_data))
+    idxs = np.random.choice(len(X_data), n_samples, replace=False)
+
+    X_orig = X_data[idxs]
+    X_recon = autoencoder.predict(X_orig)
+
+    n_rows = 2
+    n_cols = n_samples
+
+    plt.figure(figsize=(2 * n_cols, 4))
+
+    # Original images
+    for i, idx in enumerate(idxs):
+        ax = plt.subplot(n_rows, n_cols, i + 1)
+        ax.imshow(X_orig[i].reshape(img_shape), cmap='gray')
+        ax.set_title("Original")
+        ax.axis('off')
+
+    # Reconstructed images
+    for i, idx in enumerate(idxs):
+        ax = plt.subplot(n_rows, n_cols, n_cols + i + 1)
+        ax.imshow(X_recon[i].reshape(img_shape), cmap='gray')
+        ax.set_title("Recon")
+        ax.axis('off')
+
+    plt.tight_layout()
+    plt.show()
+
 
 # ============================================================
 # MAIN: RUN STEPS 1–3 FOR DEMO
@@ -311,15 +350,17 @@ def main():
 
     # ----- STEP 3A: PCA -----
     pca, (Z_train_pca, Z_val_pca, Z_test_pca), (pca_2d, Z_train_2d) = \
-        run_pca(X_train, X_val, X_test, n_components_list=(10, 20, 50, 100))
+    run_pca(X_train, X_val, X_test, variance_threshold=0.95)
 
     plot_2d_embedding(Z_train_2d, y_train,
                       title="PCA 2D Projection (Train Labels)")
 
     # ----- STEP 3B: AUTOENCODER -----
     autoencoder, encoder = train_autoencoder(
-        X_train, X_val, latent_dim=32, epochs=50, batch_size=64
-    )
+    X_train, X_val, latent_dim=48, epochs=50, batch_size=64
+)
+    show_autoencoder_reconstructions(autoencoder, X_val, img_shape=(112, 92))
+
 
     Z_train_ae = encoder.predict(X_train)
     Z_train_ae_2d = Z_train_ae[:, :2]
