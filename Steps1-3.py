@@ -9,11 +9,8 @@ import matplotlib.pyplot as plt
 from scipy.io import loadmat
 
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
-from sklearn.cluster import KMeans, AgglomerativeClustering
-from sklearn.metrics import classification_report, confusion_matrix
-from sklearn.preprocessing import OneHotEncoder
 
 import tensorflow as tf
 from tensorflow.keras import layers, models, optimizers, callbacks
@@ -41,22 +38,22 @@ def load_umist_mat(mat_path):
         y: (N,) int labels 0..19 (person index)
     """
     mat = loadmat(mat_path)
-    facedat = mat['facedat']         # (1, 20) cell-like object array
-    dirnames = mat['dirnames'][0]    # array of person name entries (unused here)
+    facedat = mat['facedat']         
+    dirnames = mat['dirnames'][0]    
 
     images = []
     labels = []
 
-    num_people = facedat.shape[1]    # should be 20
+    num_people = facedat.shape[1]  
     for person_idx in range(num_people):
-        # facedat[0, person_idx] has shape (112, 92, n_i)
+       
         person_imgs = facedat[0, person_idx]
         H, W, num_imgs = person_imgs.shape
 
         for j in range(num_imgs):
-            img = person_imgs[:, :, j]   # (112, 92)
+            img = person_imgs[:, :, j]  
             images.append(img.flatten().astype(np.float32))
-            labels.append(person_idx)    # integer label 0..19
+            labels.append(person_idx)    
 
     X = np.vstack(images)                # (N, 112*92)
     y = np.array(labels, dtype=int)      # (N,)
@@ -77,6 +74,8 @@ def create_dataframe(X, y):
         'image': list(X),
         'label': y
     })
+    print("\nDataFrame head:")
+    print(df.head())
     return df
 
 
@@ -99,7 +98,7 @@ def show_sample_images(X, y, n_samples=9, img_shape=(112, 92)):
         ax.set_title(f"Label: {y[idx]}")
         ax.axis('off')
 
-    # Hide any unused axes
+  
     for ax in axes[n_samples:]:
         ax.axis('off')
 
@@ -123,7 +122,7 @@ def stratified_split_normalize(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio
     """
     assert abs(train_ratio + val_ratio + test_ratio - 1.0) < 1e-6
 
-    # First split train vs (val+test)
+  
     X_train_orig, X_tmp_orig, y_train, y_tmp = train_test_split(
         X, y,
         test_size=1.0 - train_ratio,
@@ -131,7 +130,7 @@ def stratified_split_normalize(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio
         random_state=RANDOM_STATE
     )
 
-    # Then split tmp into val and test
+  
     val_size = val_ratio / (val_ratio + test_ratio)
     X_val_orig, X_test_orig, y_val, y_test = train_test_split(
         X_tmp_orig, y_tmp,
@@ -140,7 +139,7 @@ def stratified_split_normalize(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio
         random_state=RANDOM_STATE
     )
 
-    # Normalize using training data only
+   
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train_orig)
     X_val_scaled = scaler.transform(X_val_orig)
@@ -200,7 +199,7 @@ def run_pca(X_train, X_val, X_test, n_components_list=(10, 20, 50, 100)):
     plt.tight_layout()
     plt.show()
 
-    # Choose a specific n_components (e.g. 50) for later steps
+    
     chosen_n = 50 if max(n_components_list) >= 50 else max(n_components_list)
     pca_final = PCA(n_components=chosen_n, random_state=RANDOM_STATE)
     Z_train = pca_final.fit_transform(X_train)
@@ -287,3 +286,46 @@ def train_autoencoder(X_train, X_val, latent_dim=32, epochs=50, batch_size=64):
     plt.show()
 
     return autoencoder, encoder
+
+
+# ============================================================
+# MAIN: RUN STEPS 1–3 FOR DEMO
+# ============================================================
+
+def main():
+    mat_path = "umist_cropped.mat"   
+
+    # ----- STEP 1 -----
+    X, y = load_umist_mat(mat_path)
+    df = create_dataframe(X, y)
+    show_sample_images(X, y, n_samples=9, img_shape=(112, 92))
+
+    # ----- STEP 2 -----
+    (X_train, X_val, X_test,
+     y_train, y_val, y_test,
+     scaler,
+     X_train_orig, X_val_orig, X_test_orig) = stratified_split_normalize(X, y)
+
+    plot_label_distribution(y_train, y_val, y_test,
+                            title_prefix="UMIST - ")
+
+    # ----- STEP 3A: PCA -----
+    pca, (Z_train_pca, Z_val_pca, Z_test_pca), (pca_2d, Z_train_2d) = \
+        run_pca(X_train, X_val, X_test, n_components_list=(10, 20, 50, 100))
+
+    plot_2d_embedding(Z_train_2d, y_train,
+                      title="PCA 2D Projection (Train Labels)")
+
+    # ----- STEP 3B: AUTOENCODER -----
+    autoencoder, encoder = train_autoencoder(
+        X_train, X_val, latent_dim=32, epochs=50, batch_size=64
+    )
+
+    Z_train_ae = encoder.predict(X_train)
+    Z_train_ae_2d = Z_train_ae[:, :2]
+    plot_2d_embedding(Z_train_ae_2d, y_train,
+                      title="Autoencoder Latent 2D (Train Labels)")
+
+
+if __name__ == "__main__":
+    main()
