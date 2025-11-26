@@ -358,8 +358,8 @@ def main():
 
     # ----- STEP 3B: AUTOENCODER -----
     autoencoder, encoder = train_autoencoder(
-    X_train, X_val, latent_dim=48, epochs=50, batch_size=64
-)
+        X_train, X_val, latent_dim=48, epochs=50, batch_size=64
+    )
     show_autoencoder_reconstructions(autoencoder, X_val, img_shape=(112, 92))
 
 
