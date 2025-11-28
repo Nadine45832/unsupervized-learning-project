@@ -170,11 +170,13 @@ def plot_2d_embedding(features, labels, title):
 def build_autoencoder(input_dim, bottleneck_dim=100):
     autoencoder = Sequential([
         layers.Input(shape=(input_dim,)),
+        layers.Dense(512, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.BatchNormalization(),
         layers.Dense(256, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.Dense(128, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.BatchNormalization(),
         layers.Dense(bottleneck_dim, activation='leaky_relu', name='bottleneck', kernel_initializer="he_normal"),
-        layers.Dense(128, activation='leaky_relu', kernel_initializer="he_normal"),
         layers.Dense(256, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Dense(512, activation='leaky_relu', kernel_initializer="he_normal"),
         layers.Dense(input_dim, activation=None)
     ])
 
@@ -274,15 +276,81 @@ def claster_with_kmeans(features):
     return kmean.fit_predict(features)
 
 
-def claster_with_dbscan(features):
-    db = DBSCAN(eps=0.5, min_samples=2, metric='cosine')
-    labels = db.fit_predict(features)
+def claster_with_dbscan(features, title):
+    eps_values = [0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6]
+    min_samples_values = range(5, 21)
+    results = []
 
-    num_clusters = len(set(labels)) - (1 if -1 in labels else 0)
-    print(f"Found {num_clusters} clusters")
+    for eps in eps_values:
+        for min_samples in min_samples_values:
+            db = DBSCAN(eps=eps, min_samples=min_samples, metric='cosine')
+            labels = db.fit_predict(features)
 
-    num_noise = list(labels).count(-1)
-    print(f"Noise points: {num_noise}")
+            n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
+            n_noise = list(labels).count(-1)
+            noise_ratio = n_noise / len(labels)
+
+            # skip results when everything is outliers and 1 or 2 cluster
+            # or if 40% of points are outliers
+            if n_clusters < 3 or noise_ratio > 0.4:
+                continue
+
+            real_clusters = labels != -1
+            silhouette = silhouette_score(
+                features[real_clusters], labels[real_clusters])
+            noise_ratio = n_noise / len(labels)
+            results.append({
+                "n_clusters": n_clusters,
+                "n_noise": n_noise,
+                "eps": eps,
+                "min_samples": min_samples,
+                "silhouette": silhouette,
+                "noise_ratio": noise_ratio
+            })
+
+    for res in sorted(results, key=lambda r: r['silhouette']):
+        print(f"\nDBScan results or {title}:")
+        print(f"  eps: {res['eps']}")
+        print(f"  min_samples: {res['min_samples']}")
+        print(f"  Number of clusters: {res['n_clusters']}")
+        print(f"  Noise points: {res['n_noise']} ({res['noise_ratio']:.2%})")
+        print(f"  Silhouette Score: {res['silhouette']}")
+
+    return results
+
+
+def visualize_dbscan(results):
+
+    # Sort by silhouette score
+    sorted_results = sorted(results, key=lambda x: x['silhouette'], reverse=True)
+
+    fig, axes = plt.subplots(1, 2, figsize=(15, 12))
+
+    # Silhouette scores
+    ax = axes[0]
+    labels_plot = [f"eps={r['eps']}\nmin={r['min_samples']}" for r in sorted_results]
+    colors = plt.cm.viridis(np.linspace(0, 1, len(sorted_results)))
+    ax.barh(range(len(sorted_results)), [r['silhouette'] for r in sorted_results], color=colors)
+    ax.set_yticks(range(len(sorted_results)))
+    ax.set_yticklabels(labels_plot)
+    ax.set_xlabel('Silhouette Score')
+    ax.set_title('Top Parameter Combinations by Silhouette Score')
+    ax.grid(True, alpha=0.3)
+
+    # Number of clusters vs noise ratio
+    ax = axes[1]
+    scatter = ax.scatter([r['n_clusters'] for r in results],
+                        [r['noise_ratio'] for r in results],
+                        c=[r['silhouette'] for r in results],
+                        s=100, cmap='viridis', alpha=0.6)
+    ax.set_xlabel('Number of Clusters')
+    ax.set_ylabel('Noise Ratio')
+    ax.set_title('Clusters vs Noise Ratio (colored by Silhouette)')
+    plt.colorbar(scatter, ax=ax, label='Silhouette Score')
+    ax.grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plt.show()
 
 
 def claster_with_gmm(features):
@@ -326,7 +394,7 @@ def main():
     _, (X_pca_train, X_pca_val, X_pca_test), pca_train_2d = run_pca(X_train, X_val, X_test)
     plot_2d_embedding(pca_train_2d, y_train, "PCA for only 2 components")
 
-    autoencoder, encoder = build_autoencoder(X_train.shape[1], 64)
+    autoencoder, encoder = build_autoencoder(X_train.shape[1], 100)
     train_autoencoder(autoencoder, X_train, X_val, 50, 64)
     show_autoencoder_reconstructions(autoencoder, X_test, 10)
     autoencoder_train = encoder.predict(X_train)
@@ -340,8 +408,10 @@ def main():
     claster_with_kmeans(X_pca_train)
     claster_with_kmeans(autoencoder_train)
 
-    claster_with_dbscan(X_pca_train)
-    claster_with_dbscan(autoencoder_train)
+    results = claster_with_dbscan(X_pca_train, "PCA")
+    visualize_dbscan(results)
+    results = claster_with_dbscan(autoencoder_train, "Autoencoder")
+    visualize_dbscan(results)
 
     # claster_with_gmm(X_pca_train)
     # claster_with_gmm(autoencoder_train)
