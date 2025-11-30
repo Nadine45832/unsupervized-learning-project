@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans, DBSCAN
 from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import StandardScaler, normalize
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
 
@@ -353,35 +353,45 @@ def visualize_dbscan(results):
     plt.show()
 
 
-def claster_with_gmm(features):
-    # TODO: we should try different covariance_type and parameters
+def claster_with_gmm(images):
     results = {"n_components": [], "bic": [], "aic": []}
-    for n in range(3, 41):
-        gm = GaussianMixture(n_components=n, covariance_type='full', random_state=RANDOM_STATE)
-        gm.fit(features)
-        labels = gm.predict(features)
-        bic = gm.bic(features)
-        aic = gm.aic(features)
+    covariance_types = ['full', 'tied', 'diag', 'spherical']
 
-        results["gmm"]["n_components"].append(n)
-        results["gmm"]["bic"].append(bic)
-        results["gmm"]["aic"].append(aic)
+    features = images.astype(np.float64)
+    results = []
 
-    plt.figure(figsize=(12, 5))
-    plt.subplot(1, 3, 1)
-    plt.plot(results["gmm"]["n_components"], results["gmm"]["bic"], marker='o')
-    plt.xlabel("n_components")
-    plt.ylabel("BIC")
-    plt.title("GMM: BIC vs n_components")
+    for c_type in covariance_types:
+        r = {"n_components": [], "bic": [], "aic": [], "covariance_type": c_type}
+        results.append(r)
 
-    plt.subplot(1, 3, 2)
-    plt.plot(results["gmm"]["n_components"], results["gmm"]["aic"], marker='o')
-    plt.xlabel("n_components")
-    plt.ylabel("AIC")
-    plt.title("GMM: AIC vs n_components")
+        for n in range(10, 30):
+            gm = GaussianMixture(n_components=n, covariance_type=c_type, random_state=RANDOM_STATE, max_iter=200)
+            gm.fit(features)
+            labels = gm.predict(features)
+            bic = gm.bic(features)
+            aic = gm.aic(features)
 
-    plt.tight_layout()
-    plt.show()
+            r["n_components"].append(n)
+            r["bic"].append(bic)
+            r["aic"].append(aic)
+
+    for r in results:
+        c_type = r["covariance_type"]
+        plt.figure(figsize=(12, 5))
+        plt.subplot(1, 2, 1)
+        plt.plot(r["n_components"], r["bic"], marker='o')
+        plt.xlabel("n_components")
+        plt.ylabel("BIC")
+        plt.title(f"GMM  ({c_type}): BIC vs n_components")
+
+        plt.subplot(1, 2, 2)
+        plt.plot(r["n_components"], r["aic"], marker='o')
+        plt.xlabel("n_components")
+        plt.ylabel("AIC")
+        plt.title(f"GMM ({c_type}): AIC vs n_components")
+
+        plt.tight_layout()
+        plt.show()
 
 
 def main():
@@ -398,6 +408,7 @@ def main():
     train_autoencoder(autoencoder, X_train, X_val, 50, 64)
     show_autoencoder_reconstructions(autoencoder, X_test, 10)
     autoencoder_train = encoder.predict(X_train)
+    autoencoder_normalized_train = normalize(autoencoder_train, norm="l2")
 
     autoencoder_2d, encoder_2d = build_autoencoder(X_train.shape[1], 2)
     train_autoencoder(autoencoder_2d, X_train, X_val, 20, 64)
@@ -406,15 +417,15 @@ def main():
     plot_2d_embedding(autoencoder_2d_train, y_train, "Autoencoder for only 2 components")
 
     claster_with_kmeans(X_pca_train)
-    claster_with_kmeans(autoencoder_train)
+    claster_with_kmeans(autoencoder_normalized_train)
 
     results = claster_with_dbscan(X_pca_train, "PCA")
     visualize_dbscan(results)
-    results = claster_with_dbscan(autoencoder_train, "Autoencoder")
+    results = claster_with_dbscan(autoencoder_normalized_train, "Autoencoder")
     visualize_dbscan(results)
 
-    # claster_with_gmm(X_pca_train)
-    # claster_with_gmm(autoencoder_train)
+    claster_with_gmm(X_pca_train)
+    claster_with_gmm(autoencoder_normalized_train)
 
 
 main()
