@@ -9,8 +9,13 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, normalize
 from sklearn.decomposition import PCA
 from sklearn.metrics import silhouette_score
+from sklearn.metrics import (
+    silhouette_score,
+    confusion_matrix,
+    classification_report
+)
 
-from tensorflow.keras import layers, models, callbacks, Sequential
+from tensorflow.keras import layers, models, callbacks, Sequential, optimizers
 
 RANDOM_STATE = 42
 
@@ -394,6 +399,110 @@ def claster_with_gmm(images):
         plt.show()
 
 
+def build_cnn_classifier(input_dim, num_classes):
+    model = Sequential([
+        layers.Input(shape=(input_dim,)),
+        layers.Conv2D(512, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Conv2D(512, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.MaxPool2D((3, 3)),
+        layers.Dropout(0.3),
+        layers.Conv2D(256, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Conv2D(256, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.MaxPool2D((3, 3)),
+        layers.Dropout(0.3),
+        layers.Conv2D(128, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Conv2D(128, 3, activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.MaxPool2D((3, 3)),
+        layers.Dropout(0.3),
+        layers.Flattern(),
+        layers.Dense(256, activation='leaky_relu'),
+        layers.Dense(128, activation='leaky_relu'),
+        layers.Dropout(0.3),
+        layers.Dense(num_classes, activation='softmax')
+    ])
+
+    model.compile(
+        optimizer=optimizers.Adam(learning_rate=1e-3),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    model.summary()
+    return model
+
+
+def train_and_evaluate_classifier(Z_train, y_train,
+                                  Z_val, y_val,
+                                  Z_test, y_test):
+
+    num_classes = len(np.unique(y_train))
+    input_dim = Z_train.shape[1]
+
+    model = build_cnn_classifier(input_dim, num_classes)
+
+    es = callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=5,
+        restore_best_weights=True
+    )
+
+    history = model.fit(
+        Z_train, y_train,
+        validation_data=(Z_val, y_val),
+        epochs=50,
+        batch_size=64,
+        callbacks=[es],
+        verbose=1
+    )
+
+    # Plot training curves
+    # Accuracy
+    plt.figure(figsize=(6, 4))
+    plt.plot(history.history['accuracy'], label='Train Acc')
+    plt.plot(history.history['val_accuracy'], label='Val Acc')
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title("NN Classifier – Accuracy")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Loss
+    plt.figure(figsize=(6, 4))
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title("NN Classifier – Loss")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Evaluate on test data
+    test_loss, test_acc = model.evaluate(Z_test, y_test, verbose=0)
+    print(f"\nTest loss: {test_loss:.4f}  |  Test accuracy: {test_acc:.4f}")
+
+    # Confusion matrix & classification report
+    y_pred_probs = model.predict(Z_test)
+    y_pred = np.argmax(y_pred_probs, axis=1)
+
+    print("\nClassification report (test):")
+    print(classification_report(y_test, y_pred))
+
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(6, 5))
+    plt.imshow(cm, interpolation='nearest')
+    plt.title("Confusion Matrix (Test)")
+    plt.colorbar()
+    plt.xlabel("Predicted label")
+    plt.ylabel("True label")
+    plt.tight_layout()
+    plt.show()
+
+    return model
+
+
 def main():
     images, labels = load_data()
     show_sample_images(images, labels, 12)
@@ -426,6 +535,12 @@ def main():
 
     claster_with_gmm(X_pca_train)
     claster_with_gmm(autoencoder_normalized_train)
+
+    classifier_model = train_and_evaluate_classifier(
+        X_train, y_train,
+        X_val, y_val,
+        X_test, y_test
+    )
 
 
 main()
