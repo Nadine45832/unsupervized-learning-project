@@ -47,7 +47,7 @@ def load_data():
 
     print("Amount of images", len(all_images))
 
-    return np.vstack(all_images), all_labels
+    return np.vstack(all_images), np.array(all_labels, dtype=np.int32)
 
 
 def show_sample_images(images, labels, images_to_show):
@@ -72,6 +72,31 @@ def show_sample_images(images, labels, images_to_show):
 
     plt.tight_layout()
     plt.show()
+
+
+def split_and_pixel_normalize(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
+    X_train_orig, X_tmp_orig, y_train, y_tmp = train_test_split(
+        X, y,
+        test_size=1.0 - train_ratio,
+        stratify=y,
+        random_state=RANDOM_STATE
+    )
+
+    val_size = val_ratio / (val_ratio + test_ratio)
+    X_val_orig, X_test_orig, y_val, y_test = train_test_split(
+        X_tmp_orig, y_tmp,
+        test_size=1.0 - val_size,
+        stratify=y_tmp,
+        random_state=RANDOM_STATE
+    )
+
+    print(X_train_orig[:5])
+    X_train_scaled = X_train_orig / 255.0
+    X_val_scaled = X_val_orig / 255.0
+    X_test_scaled = X_test_orig / 255.0
+
+    return (X_train_scaled, X_val_scaled, X_test_scaled,
+            y_train, y_val, y_test)
 
 
 def split_and_normalize(X, y, train_ratio=0.7, val_ratio=0.15, test_ratio=0.15):
@@ -220,6 +245,22 @@ def train_autoencoder(autoencoder, X_train, X_val, epochs=20, batch_size=64):
     plt.tight_layout()
     plt.show()
 
+def compute_purity(y_true, y_pred):
+    y_true = np.asarray(y_true)
+    y_pred = np.asarray(y_pred)
+
+    N = len(y_true)
+    purity_sum = 0.0
+    for cluster_id in np.unique(y_pred):
+        idx = np.where(y_pred == cluster_id)[0]
+        if len(idx) == 0:
+            continue
+        true_labels_in_cluster = y_true[idx]
+        majority_count = np.bincount(true_labels_in_cluster).max()
+        purity_sum += majority_count
+
+    return purity_sum / N
+
 
 def show_autoencoder_reconstructions(autoencoder, images, n_samples=10):
     indices = np.random.choice(images.shape[0], n_samples, replace=False)
@@ -277,7 +318,7 @@ def claster_with_kmeans(features):
     plt.tight_layout()
     plt.show()
 
-    kmean = KMeans(n_clusters=29, random_state=RANDOM_STATE, n_init=10)
+    kmean = KMeans(n_clusters=20, random_state=RANDOM_STATE, n_init=10)
     return kmean.fit_predict(features)
 
 
@@ -401,23 +442,19 @@ def claster_with_gmm(images):
 
 def build_cnn_classifier(input_dim, num_classes):
     model = Sequential([
-        layers.Input(shape=(input_dim,)),
-        layers.Conv2D(512, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.Conv2D(512, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.MaxPool2D((3, 3)),
+        layers.Input(shape=(112, 92, 1)),
+        layers.Conv2D(128, (3, 3), activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Conv2D(128, (3, 3), activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.MaxPooling2D((3, 3)),
         layers.Dropout(0.3),
-        layers.Conv2D(256, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.Conv2D(256, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.MaxPool2D((3, 3)),
+        layers.Conv2D(64, (3, 3), activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.Conv2D(64, (3, 3), activation='leaky_relu', kernel_initializer="he_normal"),
+        layers.MaxPooling2D((3, 3)),
+        layers.Flatten(),
         layers.Dropout(0.3),
-        layers.Conv2D(128, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.Conv2D(128, 3, activation='leaky_relu', kernel_initializer="he_normal"),
-        layers.MaxPool2D((3, 3)),
-        layers.Dropout(0.3),
-        layers.Flattern(),
         layers.Dense(256, activation='leaky_relu'),
         layers.Dense(128, activation='leaky_relu'),
-        layers.Dropout(0.3),
+        layers.Dense(64, activation='leaky_relu'),
         layers.Dense(num_classes, activation='softmax')
     ])
 
@@ -430,14 +467,16 @@ def build_cnn_classifier(input_dim, num_classes):
     return model
 
 
-def train_and_evaluate_classifier(Z_train, y_train,
-                                  Z_val, y_val,
-                                  Z_test, y_test):
+def train_and_evaluate_cnn_classifier(Z_train, y_train,
+                                      Z_val, y_val,
+                                      Z_test, y_test,
+                                      num_classes):
+    
+    Z_train_reshaped = Z_train.reshape(-1, 112, 92, 1).astype(np.float32).copy()
+    Z_val_reshaped = Z_val.reshape(-1, 112, 92, 1).astype(np.float32).copy()
+    Z_test_reshaped = Z_test.reshape(-1, 112, 92, 1).astype(np.float32).copy()
 
-    num_classes = len(np.unique(y_train))
-    input_dim = Z_train.shape[1]
-
-    model = build_cnn_classifier(input_dim, num_classes)
+    model = build_cnn_classifier(Z_train_reshaped, num_classes)
 
     es = callbacks.EarlyStopping(
         monitor='val_loss',
@@ -446,9 +485,9 @@ def train_and_evaluate_classifier(Z_train, y_train,
     )
 
     history = model.fit(
-        Z_train, y_train,
-        validation_data=(Z_val, y_val),
-        epochs=50,
+        Z_train_reshaped, y_train,
+        validation_data=(Z_val_reshaped, y_val),
+        epochs=20,
         batch_size=64,
         callbacks=[es],
         verbose=1
@@ -480,11 +519,11 @@ def train_and_evaluate_classifier(Z_train, y_train,
     plt.show()
 
     # Evaluate on test data
-    test_loss, test_acc = model.evaluate(Z_test, y_test, verbose=0)
+    test_loss, test_acc = model.evaluate(Z_test_reshaped, y_test, verbose=0)
     print(f"\nTest loss: {test_loss:.4f}  |  Test accuracy: {test_acc:.4f}")
 
     # Confusion matrix & classification report
-    y_pred_probs = model.predict(Z_test)
+    y_pred_probs = model.predict(Z_test_reshaped)
     y_pred = np.argmax(y_pred_probs, axis=1)
 
     print("\nClassification report (test):")
@@ -502,14 +541,103 @@ def train_and_evaluate_classifier(Z_train, y_train,
 
     return model
 
+def build_mlp_classifier(input_dim, num_classes):
+    model = models.Sequential(name="MLP_classifier")
+    model.add(layers.Input(shape=(input_dim,)))
+    model.add(layers.Dense(256, activation='relu'))
+    model.add(layers.Dropout(0.3))
+    model.add(layers.Dense(128, activation='relu'))
+    model.add(layers.Dropout(0.3))
+    model.add(layers.Dense(num_classes, activation='softmax'))
+
+    model.compile(
+        optimizer=optimizers.Adam(learning_rate=1e-3),
+        loss='sparse_categorical_crossentropy',
+        metrics=['accuracy']
+    )
+    model.summary()
+    return model
+
+
+def train_and_evaluate_ann_classifier(Z_train, y_train,
+                                  Z_val, y_val,
+                                  Z_test, y_test,
+                                  title):
+    num_classes = len(np.unique(y_train))
+    input_dim = Z_train.shape[1]
+
+    model = build_mlp_classifier(input_dim, num_classes)
+
+    es = callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=5,
+        restore_best_weights=True
+    )
+
+    history = model.fit(
+        Z_train, y_train,
+        validation_data=(Z_val, y_val),
+        epochs=50,
+        batch_size=64,
+        callbacks=[es],
+        verbose=1
+    )
+
+    plt.figure(figsize=(6, 4))
+    plt.plot(history.history['accuracy'], label='Train Acc')
+    plt.plot(history.history['val_accuracy'], label='Val Acc')
+    plt.xlabel("Epoch")
+    plt.ylabel("Accuracy")
+    plt.title(f"NN Classifier – Accuracy {title}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Loss
+    plt.figure(figsize=(6, 4))
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Val Loss')
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.title(f"NN Classifier – Loss {title}")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
+
+    # Evaluate on test data
+    test_loss, test_acc = model.evaluate(Z_test, y_test, verbose=0)
+    print(f"\nTest loss: {test_loss:.4f}  |  Test accuracy: {test_acc:.4f}")
+
+    # Confusion matrix & classification report
+    y_pred_probs = model.predict(Z_test)
+    y_pred = np.argmax(y_pred_probs, axis=1)
+
+    print("\nClassification report (test):")
+    print(classification_report(y_test, y_pred))
+
+    cm = confusion_matrix(y_test, y_pred)
+    plt.figure(figsize=(6, 5))
+    plt.imshow(cm, interpolation='nearest')
+    plt.title(f"Confusion Matrix (Test) {title}")
+    plt.colorbar()
+    plt.xlabel("Predicted label")
+    plt.ylabel("True label")
+    plt.tight_layout()
+    plt.show()
+
+    return model
+
 
 def main():
     images, labels = load_data()
     show_sample_images(images, labels, 12)
-    (X_train, X_val, X_test, y_train, y_val, y_test, _) = split_and_normalize(images, labels)
+    (X_train, X_val, X_test, y_train, y_val, y_test) = split_and_pixel_normalize(images, labels)
 
     plot_label_distribution(y_train, y_val, y_test)
 
+    # Feature reduction
     _, (X_pca_train, X_pca_val, X_pca_test), pca_train_2d = run_pca(X_train, X_val, X_test)
     plot_2d_embedding(pca_train_2d, y_train, "PCA for only 2 components")
 
@@ -525,21 +653,58 @@ def main():
     autoencoder_2d_train = encoder_2d.predict(X_train)
     plot_2d_embedding(autoencoder_2d_train, y_train, "Autoencoder for only 2 components")
 
-    claster_with_kmeans(X_pca_train)
-    claster_with_kmeans(autoencoder_normalized_train)
+    # Clustering
+    pca_labels = claster_with_kmeans(X_pca_train)
+    print("KMeans (PCA) purity: ", compute_purity(y_train, pca_labels))
+    autoencoder_labels = claster_with_kmeans(autoencoder_normalized_train)
+    print("KMeans (Autoencoder) purity: ", compute_purity(y_train, autoencoder_labels))
 
     results = claster_with_dbscan(X_pca_train, "PCA")
     visualize_dbscan(results)
+    db = DBSCAN(eps=0.25, min_samples=5, metric='cosine')
+    print("DBScan (PCA) purity: ", compute_purity(y_train, db.fit_predict(X_pca_train)))
+
     results = claster_with_dbscan(autoencoder_normalized_train, "Autoencoder")
     visualize_dbscan(results)
+    db = DBSCAN(eps=0.1, min_samples=5, metric='cosine')
+    print("DBScan (Autoencoder) purity: ", compute_purity(y_train, db.fit_predict(autoencoder_normalized_train)))
 
     claster_with_gmm(X_pca_train)
-    claster_with_gmm(autoencoder_normalized_train)
+    features = X_pca_train.astype(np.float64)
+    gm = GaussianMixture(n_components=24, covariance_type="diag", random_state=RANDOM_STATE, max_iter=200)
+    gm.fit(features)
+    purity = compute_purity(y_train, gm.predict(features))
+    print(f"GMM (PCA) AIC {gm.aic(features)} BIC: {gm.bic(features)} Purity: {purity}")
 
-    classifier_model = train_and_evaluate_classifier(
-        X_train, y_train,
-        X_val, y_val,
-        X_test, y_test
+    claster_with_gmm(autoencoder_normalized_train)
+    gm = GaussianMixture(n_components=24, covariance_type="tied", random_state=RANDOM_STATE, max_iter=200)
+    features = autoencoder_normalized_train.astype(np.float64)
+    gm.fit(features)
+    purity = compute_purity(y_train, gm.predict(features))
+    print(f"GMM (Autoencoder) AIC {gm.aic(features)} BIC: {gm.bic(features)} Purity: {purity}")
+
+
+    # Classification with ANN on features
+    classifier_model = train_and_evaluate_ann_classifier(
+        X_pca_train, y_train,
+        X_pca_val, y_val,
+        X_pca_test, y_test,
+        "PCA"
+    )
+
+    classifier_model = train_and_evaluate_ann_classifier(
+        encoder.predict(X_train), y_train,
+        encoder.predict(X_val), y_val,
+        encoder.predict(X_test), y_test,
+        "Autoencoder"
+    )
+
+    (X_train_2, X_val_2, X_test_2, y_train_2, y_val_2, y_test_2) = split_and_pixel_normalize(images, labels)
+    classifier_model = train_and_evaluate_cnn_classifier(
+        X_train_2, y_train_2,
+        X_val_2, y_val_2,
+        X_test_2, y_test_2,
+        num_classes=len(set(labels))
     )
 
 
